@@ -1,0 +1,29 @@
+# --- Task data (never commit real tasks) ---
+tasks.json
+*.tasks.json
+data/
+
+# --- Secrets / credentials ---
+.env
+.env.*
+*.pem
+*.key
+credentials*.json
+token*.json
+client_secret*.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
