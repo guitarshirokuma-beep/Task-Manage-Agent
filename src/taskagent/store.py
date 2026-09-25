@@ -260,8 +260,14 @@ class TaskStore:
         due: str | None = None,
         priority: str | None = None,
         tags: list[str] | None = None,
+        clear_due: bool = False,
     ) -> Task | None:
-        """Change only the fields that are given (not None)."""
+        """Change only the fields that are given (not None).
+
+        clear_due=True removes the deadline. It cannot be combined with due.
+        """
+        if clear_due and due is not None:
+            raise ValidationError("pass either due or clear_due, not both.")
         # Validate before loading so invalid input never touches the file.
         new_title = None if title is None else validate_title(title)
         new_due = None if due is None else validate_date(due)
@@ -276,12 +282,23 @@ class TaskStore:
             task.title = new_title
         if new_due is not None:
             task.due = new_due
+        if clear_due:
+            task.due = None
         if new_priority is not None:
             task.priority = new_priority
         if new_tags is not None:
             task.tags = new_tags
         self._save(tasks)
         return task
+
+    def all_tags(self) -> list[str]:
+        """Every tag used by any task (open or done), in first-seen order."""
+        tags: list[str] = []
+        for task in self._load():
+            for tag in task.tags:
+                if tag not in tags:
+                    tags.append(tag)
+        return tags
 
     def delete(self, task_id: str) -> Task | None:
         """Remove a task and return it, or None if it did not exist."""

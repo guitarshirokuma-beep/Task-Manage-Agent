@@ -12,6 +12,7 @@ import inspect
 import logging
 import sys
 from collections.abc import Callable
+from datetime import date
 from functools import wraps
 from typing import Annotated, Literal
 
@@ -51,7 +52,8 @@ DueDate = Annotated[
     Field(
         description=(
             "Deadline as a date in YYYY-MM-DD format, e.g. '2026-11-08'. "
-            "Convert relative dates ('tomorrow', 'next Friday') to this format first. "
+            "Convert relative dates ('tomorrow', 'next Friday') to this format first; "
+            "if you are unsure of today's date, list_tasks shows it on its first line. "
             "Omit if there is no deadline."
         ),
     ),
@@ -87,30 +89,57 @@ def not_found(task_id: str) -> str:
     )
 
 
-def explain_errors(fn: Callable[..., str]) -> Callable[..., str]:
-    """Turn expected errors into readable text instead of a failed tool call."""
+def today_line(today: date) -> str:
+    return f"Today is {today.isoformat()} ({today.strftime('%A')})."
 
-    @wraps(fn)
-    def wrapper(*args, **kwargs) -> str:
-        try:
-            return fn(*args, **kwargs)
-        except ValidationError as e:
-            return f"Invalid input: {e} Nothing was changed."
-        except StoreError as e:
-            logger.error("storage error: %s", e)
-            return f"Storage error: {e}"
 
-    # The docstring becomes the tool description; strip the source indentation.
-    wrapper.__doc__ = inspect.cleandoc(fn.__doc__ or "")
-    return wrapper
+def describe_filters(status: str, tag: str | None, due_before: str | None) -> str:
+    parts = [f"status={status}"]
+    if tag is not None:
+        parts.append(f"tag='{tag}'")
+    if due_before is not None:
+        parts.append(f"due_before={due_before}")
+    return ", ".join(parts)
+
+
+def make_error_handler(today: Callable[[], date]) -> Callable[[Callable[..., str]], Callable[..., str]]:
+    """Decorator factory: turn expected errors into readable text instead of a failed call."""
+
+    def explain_errors(fn: Callable[..., str]) -> Callable[..., str]:
+        @wraps(fn)
+        def wrapper(*args, **kwargs) -> str:
+            try:
+                return fn(*args, **kwargs)
+            except ValidationError as e:
+                # Most invalid input is a date the caller failed to convert,
+                # so tell it what "today" is to make the retry easy.
+                return f"Invalid input: {e} Nothing was changed. {today_line(today())}"
+            except StoreError as e:
+                logger.error("storage error: %s", e)
+                return f"Storage error: {e}"
+
+        # The docstring becomes the tool description; strip the source indentation.
+        wrapper.__doc__ = inspect.cleandoc(fn.__doc__ or "")
+        return wrapper
+
+    return explain_errors
 
 
 # --- server ------------------------------------------------------------------------------
 
 
-def create_server(store: TaskStore | None = None) -> MCPServer:
-    """Build the MCP server. Tests pass their own store; normal use reads TASKAGENT_DATA_PATH."""
+def create_server(
+    store: TaskStore | None = None,
+    *,
+    today: Callable[[], date] = date.today,
+) -> MCPServer:
+    """Build the MCP server.
+
+    Tests pass their own store and clock; normal use reads TASKAGENT_DATA_PATH
+    and the machine's local date.
+    """
     store = store if store is not None else TaskStore.from_path()
+    explain_errors = make_error_handler(today)
     server = MCPServer("taskagent", instructions=INSTRUCTIONS)
 
     @server.tool(annotations=ToolAnnotations(title="Add task", read_only_hint=False))
@@ -160,11 +189,23 @@ def create_server(store: TaskStore | None = None) -> MCPServer:
 
         Use this to show the user their tasks, and ALWAYS call it first to find a
         task's id before calling complete_task, update_task or delete_task.
+        The first line of the result is today's date, which you can use to convert
+        relative dates. If a tag filter matches nothing, the existing tags are listed.
         """
         tasks = store.list_tasks(status=status, tag=tag, due_before=due_before)
+        header = today_line(today())
         if not tasks:
-            return "No tasks match these filters."
-        lines = [f"{len(tasks)} task(s):"] + [format_task(t) for t in tasks]
+            message = f"{header}\nNo tasks match ({describe_filters(status, tag, due_before)})."
+            if tag is not None:
+                known = store.all_tags()
+                if tag.strip() not in known:
+                    message += (
+                        f"\nNo task has the tag '{tag}'. Existing tags: {', '.join(known)}."
+                        if known
+                        else "\nNo task has any tags yet."
+                    )
+            return message
+        lines = [header, f"{len(tasks)} task(s):"] + [format_task(t) for t in tasks]
         return "\n".join(lines)
 
     @server.tool(
@@ -212,19 +253,30 @@ def create_server(store: TaskStore | None = None) -> MCPServer:
                 ),
             ),
         ] = None,
+        clear_due: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Set to true to remove the task's deadline. Do not pass due at the same time."
+                ),
+            ),
+        ] = False,
     ) -> str:
         """Change some fields of an existing task. Only the fields you pass are changed.
 
-        Use this to rename a task or change its deadline, priority or tags.
+        Use this to rename a task or change its deadline, priority or tags,
+        or to remove its deadline (clear_due=true).
         Call list_tasks first to get the task's id; never guess it.
         To mark a task finished, use complete_task instead.
         """
-        if title is None and due is None and priority is None and tags is None:
+        if title is None and due is None and priority is None and tags is None and not clear_due:
             return (
                 "No fields to change were given. Pass at least one of "
-                "title, due, priority or tags. Nothing was changed."
+                "title, due, priority, tags or clear_due. Nothing was changed."
             )
-        task = store.update(id, title=title, due=due, priority=priority, tags=tags)
+        task = store.update(
+            id, title=title, due=due, priority=priority, tags=tags, clear_due=clear_due
+        )
         if task is None:
             return not_found(id)
         return f"Updated task {task.id}.\n{format_task(task)}"

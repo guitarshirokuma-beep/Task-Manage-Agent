@@ -1,5 +1,7 @@
 """Tests for the MCP layer: tool schemas and the text each tool returns."""
 
+from datetime import date
+
 import anyio
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
@@ -15,9 +17,12 @@ def store(tmp_path):
     return TaskStore(JsonFileBackend(tmp_path / "tasks.json"))
 
 
+FIXED_TODAY = date(2026, 9, 25)  # a Friday
+
+
 @pytest.fixture
 def server(store):
-    return create_server(store)
+    return create_server(store, today=lambda: FIXED_TODAY)
 
 
 def call(server, name, **arguments):
@@ -181,3 +186,64 @@ def test_invalid_enum_is_rejected_by_schema(server, store):
     with pytest.raises(ToolError, match="priority"):
         call_raw(server, "add_task", title="T", priority="urgent")
     assert store.list_tasks() == []
+
+
+# --- Phase 4 improvements ---------------------------------------------------------------
+
+
+def test_list_starts_with_today(server, store):
+    store.add("T")
+    assert call(server, "list_tasks").splitlines()[0] == "Today is 2026-09-25 (Friday)."
+
+
+def test_empty_list_also_shows_today_and_filters(server):
+    text = call(server, "list_tasks", status="done", due_before="2026-10-01")
+    assert "Today is 2026-09-25 (Friday)." in text
+    assert "status=done" in text and "due_before=2026-10-01" in text
+
+
+def test_invalid_date_message_includes_today(server):
+    text = call(server, "add_task", title="T", due="来週")
+    assert "Invalid input" in text
+    assert "Today is 2026-09-25 (Friday)." in text
+
+
+def test_unknown_tag_lists_existing_tags(server, store):
+    store.add("A", tags=["就活", "ES"])
+    store.add("B", tags=["買い物"])
+    text = call(server, "list_tasks", tag="就職活動")
+    assert "No task has the tag '就職活動'" in text
+    assert "Existing tags: 就活, ES, 買い物" in text
+
+
+def test_known_tag_with_no_open_tasks_does_not_list_tags(server, store):
+    task = store.add("A", tags=["job"])
+    store.complete(task.id)
+    text = call(server, "list_tasks", tag="job")
+    assert "No tasks match" in text
+    assert "Existing tags" not in text
+
+
+def test_unknown_tag_when_no_tags_exist(server, store):
+    store.add("A")
+    assert "No task has any tags yet." in call(server, "list_tasks", tag="x")
+
+
+def test_clear_due_through_mcp(server, store):
+    task = store.add("T", due="2026-10-10")
+    text = call(server, "update_task", id=task.id, clear_due=True)
+    assert "due: none" in text
+    assert store.get(task.id).due is None
+
+
+def test_clear_due_and_due_together_is_explained(server, store):
+    task = store.add("T", due="2026-10-10")
+    text = call(server, "update_task", id=task.id, due="2026-10-11", clear_due=True)
+    assert "Invalid input" in text
+    assert store.get(task.id).due == "2026-10-10"
+
+
+def test_clear_due_is_documented(server):
+    props = tools_by_name(server)["update_task"].input_schema["properties"]
+    assert props["clear_due"]["type"] == "boolean"
+    assert props["clear_due"].get("default") is False

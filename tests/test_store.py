@@ -109,6 +109,26 @@ def test_update_all_fields(store):
     )
 
 
+def test_clear_due_removes_deadline(store):
+    task = store.add("T", due="2026-10-10")
+    assert store.update(task.id, clear_due=True).due is None
+    assert store.get(task.id).due is None
+
+
+def test_clear_due_with_due_is_rejected(store):
+    task = store.add("T", due="2026-10-10")
+    with pytest.raises(ValidationError):
+        store.update(task.id, due="2026-10-11", clear_due=True)
+    assert store.get(task.id).due == "2026-10-10"
+
+
+def test_all_tags_includes_done_tasks_without_duplicates(store):
+    a = store.add("A", tags=["job", "es"])
+    store.add("B", tags=["home", "job"])
+    store.complete(a.id)
+    assert store.all_tags() == ["job", "es", "home"]
+
+
 def test_delete_removes_task(store):
     keep = store.add("Keep")
     drop = store.add("Drop")
