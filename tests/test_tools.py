@@ -110,14 +110,14 @@ def test_date_arguments_mention_the_format(server):
 
 
 def test_add_then_list(server, store):
-    text = call(server, "add_task", title="ESを提出する", due="2026-11-08", priority="high", tags=["就活"])
+    text = call(server, "add_task", title="牛乳を買う", due="2026-12-01", priority="high", tags=["買い物"])
     task = store.list_tasks()[0]
 
     assert task.id in text
     listed = call(server, "list_tasks")
     assert task.id in listed
-    assert "ESを提出する" in listed
-    assert "2026-11-08" in listed
+    assert "牛乳を買う" in listed
+    assert "2026-12-01" in listed
 
 
 def test_list_empty(server):
@@ -209,11 +209,11 @@ def test_invalid_date_message_includes_today(server):
 
 
 def test_unknown_tag_lists_existing_tags(server, store):
-    store.add("A", tags=["就活", "ES"])
+    store.add("A", tags=["仕事", "家事"])
     store.add("B", tags=["買い物"])
-    text = call(server, "list_tasks", tag="就職活動")
-    assert "No task has the tag '就職活動'" in text
-    assert "Existing tags: 就活, ES, 買い物" in text
+    text = call(server, "list_tasks", tag="旅行")
+    assert "No task has the tag '旅行'" in text
+    assert "Existing tags: 仕事, 家事, 買い物" in text
 
 
 def test_known_tag_with_no_open_tasks_does_not_list_tags(server, store):

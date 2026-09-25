@@ -236,9 +236,9 @@ def test_title_is_trimmed(store):
 
 
 def test_japanese_is_stored_readably(store, path):
-    store.add("ESを提出する", tags=["就活"])
+    store.add("牛乳を買う", tags=["買い物"])
     text = path.read_text(encoding="utf-8")
-    assert "ESを提出する" in text
+    assert "牛乳を買う" in text
     assert "\\u" not in text
 
 

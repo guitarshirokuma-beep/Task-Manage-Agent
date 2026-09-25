@@ -51,7 +51,7 @@ DueDate = Annotated[
     str | None,
     Field(
         description=(
-            "Deadline as a date in YYYY-MM-DD format, e.g. '2026-11-08'. "
+            "Deadline as a date in YYYY-MM-DD format, e.g. '2026-12-31'. "
             "Convert relative dates ('tomorrow', 'next Friday') to this format first; "
             "if you are unsure of today's date, list_tasks shows it on its first line. "
             "Omit if there is no deadline."

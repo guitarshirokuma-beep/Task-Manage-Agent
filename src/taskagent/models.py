@@ -74,7 +74,7 @@ def validate_date(value: Any, field_name: str = "due") -> str:
         parsed = date.fromisoformat(text)
     except ValueError:
         raise ValidationError(
-            f"{field_name} must be a date in YYYY-MM-DD format, e.g. 2026-11-08 "
+            f"{field_name} must be a date in YYYY-MM-DD format, e.g. 2026-12-31 "
             f"(got {value!r}). Convert relative dates like 'tomorrow' before calling."
         ) from None
     # date.fromisoformat also accepts forms like 20261108; normalize to YYYY-MM-DD.
